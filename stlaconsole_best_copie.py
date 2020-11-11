@@ -792,3 +792,8 @@ def training_loop(n, exists, nr_de_recherche_MCTS):
             network_to_train = open_variable("neural_network")
 
 
+            
+            
+            
+            
+ training_loop(10, False, 800)
