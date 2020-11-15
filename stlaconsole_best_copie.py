@@ -8,9 +8,9 @@ from shutil import copyfile
 
 
 
-base_de_donnees = "stla.sqlite"
-emplacement_copie_DB = "stla.sqlite"
-emplacement_permament = "stla.sqlite"
+base_de_donnees = "C:\\Users\\eleve\\anaconda_3\\Lib\\site-packages\\stla.sqlite"
+emplacement_copie_DB = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\stla.sqlite"
+emplacement_permament = "C:\\Users\\eleve\\Downloads\\stla.sqlite"
 
 #### LES CLASSES NECESSAIRES POUR L'IA
 
@@ -51,15 +51,15 @@ class NeuralNetworks:
         self.reseau_probas = Network(optimizer = optimizer)
         self.reseau_values = Network(optimizer = optimizer)
 
-        self.reseau_probas.add_layer(nr_entrees, 64, "sigmoid")
-        self.reseau_probas.add_layer(64, 64, "sigmoid")
-        self.reseau_probas.add_layer(64, 64, "sigmoid")
+        self.reseau_probas.add_layer(nr_entrees, 32, "sigmoid")
+        self.reseau_probas.add_layer(32, 64, "sigmoid")
+        self.reseau_probas.add_layer(64, 32, "sigmoid")
+        self.reseau_probas.add_layer(32, 64, "sigmoid")
         self.reseau_probas.add_layer(64, nr_d_actions, "sigmoid")
 
         self.reseau_values.add_layer(nr_entrees, 64, "sigmoid")
         self.reseau_values.add_layer(64, 32, "sigmoid")
         self.reseau_values.add_layer(32, 1, "tanh")
-
 
     def predict(self, entree):
         vecteur_probas = self.reseau_probas.predict(entree)
@@ -221,14 +221,14 @@ class Network:
 ## Quelques programmes auxiliaires nécessaires pour la sauvegarde du jeu
 
 def open_variable(name):
-    filename = name + ".pickle"
+    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\" + name + ".pickle"
     with open(filename, "rb") as f:
         variable = pickle.load(f)
         return variable
 
 
 def save_variable(name, variable):
-    filename = name + ".pickle"
+    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\" + name + ".pickle"
     with open(filename, "wb") as f:
         pickle.dump(variable, f)
         f.close()
@@ -326,8 +326,10 @@ def _get_possible_actions_for_actual_state(etatDuJeu):
 
 
 def _normalizer(state):
-    somme = sum(state)
-    state = [i / somme for i in state]
+    min_s = min(state)
+    max_s = max(state)
+    diff = max_s - min_s
+    state = [(i - min_s) / diff for i in state]
     return state
 
 
@@ -386,7 +388,6 @@ def _initialise_root(etatDuJeu):
 
 
 def _expand_noeud(noeud, etatDuJeu, network):
-    global possible_actions
     actions, actions_filter = _get_possible_actions_for_actual_state(etatDuJeu)
     state = _get_game_state(etatDuJeu)
     prediction = network.predict(state)
@@ -569,12 +570,17 @@ def _get_etatJeu_from_enfants(node, action):
 
 
 def _get_training_examples(nr):
-    global root, noeud
+    global root, noeud, temperature
     training = []
     lance_jeu(None, False)
+    temperature = 1
+    move = 0
     while True:
         for i in range(nr):
             lance_jeu(open_variable("etatJeu"), True)
+
+        if move >= 11:
+            temperature = 0.1
 
         etat = open_variable("etatJeu")
         probabilities = _get_action_probabilities(root)
@@ -597,6 +603,8 @@ def _get_training_examples(nr):
             _set_gain(training, _points(etatJeu))
             return training
 
+        move += 1
+
 
 
 
@@ -611,11 +619,14 @@ def _points(etatDuJeu):
 
 def _get_action_probabilities(node):
     P = [0] * 75
+    P_copie = [0] * 75
     N = node.N
     if not node.est_feuille():
         for (action, c) in list(node.edges.items()):
             P[c["index"]]=c["N_s_a"] / N if N > 0 else 0
-        return P
+        max_index = P.index(max(P))
+        P_copie[max_index] = 1
+        return P_copie
     else:
         return None
 
@@ -737,12 +748,12 @@ def train_(net, donnee):
     prob = net.reseau_probas
     val = net.reseau_values
 
-    for entrainement in range(50):
+    for entrainement in range(200):
         err = 0
         for d in donnee:
             err += prob.train(d[0], d[1], 0.001)
             val.train(d[0], d[2], 0.001)
-        print(err/50)
+        print(err/len(donnee))
 
 
 def choose_best_ia(old_network, trained_network):
@@ -758,7 +769,7 @@ def winning_rate():
     total = 0
     old = open_variable("neural_network")
     new = open_variable("trained_network")
-    for _ in range(20):
+    for _ in range(25):
         b = choose_best_ia(old, new)
         w += b
         total += 1
@@ -766,16 +777,18 @@ def winning_rate():
     return w/total
 
 
+
 ## Enfin le programme final, tourner celui-ci pour voir la magie apparaître !
 
 
 def training_loop(n, exists, nr_de_recherche_MCTS):
-    global network_to_train
+    global network_to_train, temperature
     if not exists:
         network_to_train = NeuralNetworks(51, 75, optimizer = "Adam")
+        save_variable("init_net", network_to_train)
     else:
         network_to_train = open_variable("trained_network")
-    save_variable("init_net", network_to_train)
+
     for i in range(n):
         print("\n\n\n GENERATION N°: ", i+1)
         generate_data(10, nr_de_recherche_MCTS)
@@ -786,14 +799,10 @@ def training_loop(n, exists, nr_de_recherche_MCTS):
         train_(network_to_train, donnees)
         save_variable("trained_network", network_to_train)
         w = winning_rate()
-        if w >= 0.5:
+        if w >= 0.55:
             network_to_train = open_variable("trained_network")
+            print("\nNew network won by a rate of: ", w)
         else:
             network_to_train = open_variable("neural_network")
+            print("\nOld network won by a rate of: ", 1- w)
 
-
-            
-            
-            
-            
- training_loop(10, False, 800)
