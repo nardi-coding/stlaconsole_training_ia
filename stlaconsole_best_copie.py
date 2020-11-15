@@ -8,9 +8,9 @@ from shutil import copyfile
 
 
 
-base_de_donnees = "C:\\Users\\eleve\\anaconda_3\\Lib\\site-packages\\stla.sqlite"
-emplacement_copie_DB = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\stla.sqlite"
-emplacement_permament = "C:\\Users\\eleve\\Downloads\\stla.sqlite"
+base_de_donnees = "stla.sqlite"
+emplacement_copie_DB = "stla.sqlite"
+emplacement_permament = "stla.sqlite"
 
 #### LES CLASSES NECESSAIRES POUR L'IA
 
@@ -221,14 +221,14 @@ class Network:
 ## Quelques programmes auxiliaires nécessaires pour la sauvegarde du jeu
 
 def open_variable(name):
-    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\" + name + ".pickle"
+    filename = name + ".pickle"
     with open(filename, "rb") as f:
         variable = pickle.load(f)
         return variable
 
 
 def save_variable(name, variable):
-    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\Copies\\" + name + ".pickle"
+    filename = name + ".pickle"
     with open(filename, "wb") as f:
         pickle.dump(variable, f)
         f.close()
@@ -296,7 +296,7 @@ def _pid_empl_relation(etatJeu):
 
 def _get_possible_actions_for_actual_state(etatDuJeu):
     """
-    On renvoie une liste de taille 768 (la taille de toutes les actions possibles avec des 0 aux indices qui correspondent à une action qu'on ne peut pas prendre et des 1 là où on peut prendre une action
+    On renvoie une liste de taille 75 (la taille de toutes les actions possibles avec des 0 aux indices qui correspondent à une action qu'on ne peut pas prendre et des 1 là où on peut prendre une action
 
     """
     actions_filter = [0] * 75
