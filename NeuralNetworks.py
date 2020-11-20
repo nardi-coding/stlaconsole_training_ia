@@ -1,4 +1,4 @@
-
+import numpy as np
 class NeuralNetworks:
     def __init__(self, nr_entrees, nr_d_actions, optimizer = "SDG"):
         self.reseau_probas = Network(optimizer = optimizer)
@@ -19,9 +19,6 @@ class NeuralNetworks:
 
     def _get_error(self):
         return self.error
-
-    def _get_deriv_error(self):
-        return self.deriv_err
 
     def MSE(self, x, y):
         return np.mean(np.square(x - y))
@@ -57,9 +54,6 @@ class NeuralNetworks:
         vecteur_probas = self.reseau_probas.predict(entree)
         valeur_de_gain = self.reseau_values.predict(entree)
         return vecteur_probas, valeur_de_gain
-
-
-import numpy as np
 
 class Optimizer:
     def __init__(self, optimizer, n_e, n_n):
