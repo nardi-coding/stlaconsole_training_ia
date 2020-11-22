@@ -4,20 +4,12 @@ from copy import deepcopy
 import pickle
 import stlacore
 from shutil import copyfile
-
-
-
-
-base_de_donnees = "stla.sqlite"
-emplacement_copie_DB = "stla.sqlite"
-emplacement_permament = "stla.sqlite"
-
 #### LES CLASSES NECESSAIRES POUR L'IA
 
 
 
 
-PROBABILITIES = 0; VALUE = 1
+PROBABILITIES = 0; VALUE = 1; FIN_DU_JEU = 1
 
 
 class Noeud:
@@ -51,28 +43,59 @@ class NeuralNetworks:
         self.reseau_probas = Network(optimizer = optimizer)
         self.reseau_values = Network(optimizer = optimizer)
 
-        self.reseau_probas.add_layer(nr_entrees, 32, "sigmoid")
-        self.reseau_probas.add_layer(32, 64, "sigmoid")
-        self.reseau_probas.add_layer(64, 32, "sigmoid")
-        self.reseau_probas.add_layer(32, 64, "sigmoid")
-        self.reseau_probas.add_layer(64, nr_d_actions, "sigmoid")
+        self.reseau_probas.add_layer(nr_entrees, 32, "relu")
+        self.reseau_probas.add_layer(32, 64, "relu")
+        self.reseau_probas.add_layer(64, 32, "relu")
+        self.reseau_probas.add_layer(32, 64, "relu")
+        self.reseau_probas.add_layer(64, nr_d_actions, "softmax")
 
         self.reseau_values.add_layer(nr_entrees, 64, "sigmoid")
         self.reseau_values.add_layer(64, 32, "sigmoid")
         self.reseau_values.add_layer(32, 1, "tanh")
 
+        self.error = 0
+
+
+    def _get_error(self):
+        return self.error
+
+    def _get_deriv_error(self):
+        return self.deriv_err
+
+    def MSE(self, x, y):
+        return np.mean(np.square(x - y))
+
+    def deriv_MSE(self, x, y):
+        return 2 * (x - y)
+
+
+    def alphago_loss_function(self, pi_p, pi_vrai, v_p, v_vrai):
+        mse = self.MSE(v_p, np.array([v_vrai]))
+        log = -np.mean(np.array([pi_vrai]) * np.log(pi_p + 1e-8))
+        return mse + log
+
+    def deriv_alpha_go(self, pi_p, pi_vrai, v_p, v_vrai):
+        d_mse = self.deriv_MSE(v_p, v_vrai)
+        d_log = pi_p - pi_vrai
+        return d_mse, d_log
+
+    def forward(self, x, pi, v):
+        vecteur_probas, valeur_de_gain = self.predict(x)
+        self.error = self.alphago_loss_function(vecteur_probas, pi, valeur_de_gain, v)
+        return self.deriv_alpha_go(vecteur_probas, pi, valeur_de_gain, v)
+
+    def train(self, x, pi, v, eta):
+        d_mse, d_log = self.forward(x, pi, v)
+
+        self.reseau_values.train(x, eta, d_mse, False)
+        self.reseau_probas.train(x, eta, d_log, True)
+        return self.error
+
+
     def predict(self, entree):
         vecteur_probas = self.reseau_probas.predict(entree)
         valeur_de_gain = self.reseau_values.predict(entree)
         return vecteur_probas, valeur_de_gain
-
-"""
-
-Created on Tuesday 20 October, 2020
-
-@author: N.X.
-
-"""
 
 
 import numpy as np
@@ -118,6 +141,10 @@ class Layer:
             return (a - 1) / (a + 1)
         elif self.activation_function == "arctan":
             return np.arctan(Z)/np.pi + 0.5
+        elif self.activation_function == "softmax":
+            Z_ = Z - np.max(Z)
+            exp_ = np.exp(Z_)
+            return exp_ / exp_.sum()
         else:
             return Z
 
@@ -147,7 +174,9 @@ class Layer:
         return x
 
     def backward(self, previous_layer, delta_l_1, eta):
+
         delta_l = np.dot(delta_l_1, self.weights.T)* previous_layer.deriv_act_fun(previous_layer.layer_before_activation[0])
+
         grad_weights = previous_layer.layer_after_activation[0].T * delta_l_1
         grad_biais = delta_l_1
 
@@ -156,6 +185,7 @@ class Layer:
 
         self.weights -= eta * weights
         self.biais -= eta * biais
+
 
         return delta_l
 
@@ -177,27 +207,20 @@ class Network:
     def add_layer(self, number_of_entries, number_of_neurons, activation_function):
         self.layers.append(Layer(number_of_entries, number_of_neurons, activation_function, self.optim))
 
-    def MSE(self, x, y):
-        return np.mean(np.square(x - y))
-
-    def deriv_MSE(self, x, y):
-        return 2 * (x - y)
-
     def predict(self, x):
         x_ = np.array([x])
         for layer in self.layers:
             x_ = layer.forward(x_)
         return x_
 
-    def train(self, x, y, eta):
-        y = np.array([y])
-        x_ = self.predict(x)
-        error = self.MSE(x_, y)
-        delta_l_1 = self.layers[-1].deriv_act_fun(self.layers[-1].layer_before_activation[0]) * self.deriv_MSE(x_, y)
+    def train(self, x, eta, deriv_err, soft = False):
+        if not soft:
+            delta_l_1 = self.layers[-1].deriv_act_fun(self.layers[-1].layer_before_activation[0]) * deriv_err
+        else:
+            delta_l_1 = deriv_err
         for i in range(1, len(self.layers)):
             delta_l_1 = self.layers[-i].backward(self.layers[-i-1], delta_l_1, eta)
         self.layers[0].backward_first_layer(np.array([x]), delta_l_1, eta)
-        return error
 
     def __repr__(self):
         layers = ""
@@ -221,14 +244,14 @@ class Network:
 ## Quelques programmes auxiliaires nécessaires pour la sauvegarde du jeu
 
 def open_variable(name):
-    filename = name + ".pickle"
+    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\NeuralNetworkTraining\\" + name + ".pickle"
     with open(filename, "rb") as f:
         variable = pickle.load(f)
         return variable
 
 
 def save_variable(name, variable):
-    filename = name + ".pickle"
+    filename = "C:\\Users\\eleve\\Downloads\\IAMarcher\\ChallengeIA\\NeuralNetworkTraining\\" + name + ".pickle"
     with open(filename, "wb") as f:
         pickle.dump(variable, f)
         f.close()
@@ -296,22 +319,29 @@ def _pid_empl_relation(etatJeu):
 
 def _get_possible_actions_for_actual_state(etatDuJeu):
     """
-    On renvoie une liste de taille 75 (la taille de toutes les actions possibles avec des 0 aux indices qui correspondent à une action qu'on ne peut pas prendre et des 1 là où on peut prendre une action
+    On renvoie une liste de taille 768 (la taille de toutes les actions possibles avec des 0 aux indices qui correspondent à une action qu'on ne peut pas prendre et des 1 là où on peut prendre une action
 
     """
     actions_filter = [0] * 75
     actions = [None] * 75
     s = 0
 
+    j = etatDuJeu.doitJouer.equipe
+
     for personnageA in etatDuJeu.equipes[0]:
         for personnageE in etatDuJeu.equipes[1]:
             if personnageA != None and personnageE != None:
                 for capacite in range(3):
-                    if personnageA.capacites[capacite].attente == 0:
-                        action = (personnageA.pid, personnageE.pid, capacite)
-                        actions_filter[s] = 1
-                        actions[s] = action
-                        s += 1
+
+                    if j == 0:
+                        if personnageA.capacites[capacite].attente == 0:
+                            action = (personnageA.pid, personnageE.pid, capacite)
+                    else:
+                        if personnageE.capacites[capacite].attente == 0:
+                            action = (personnageA.pid, personnageE.pid, capacite)
+                    actions_filter[s] = 1
+                    actions[s] = action
+                    s += 1
 
     return actions, actions_filter
 
@@ -337,13 +367,15 @@ def _get_game_state_not_normalized(etatJeu):
 
     """ Renvoyer une liste contenant : le joueur qui doit jouer + les personnages + les caracteristiques de chaque personnage """
 
-    state = [0] * 51
+    state = [0] * 52
     if etatJeu.doitJouer == None:
         personnageQuiJoue = 0
+        state[1] = 0
     else:
         personnageQuiJoue = etatJeu.doitJouer.pid
+        state[1] = etatJeu.doitJouer.equipe
     state[0] = personnageQuiJoue
-    s = 1
+    s = 2
     L = [1, 3, 5, 7, 9]
 
     A = etatJeu.equipes[0]; E = etatJeu.equipes[1]
@@ -419,7 +451,10 @@ def lance_jeu_une_fois(etatJeu, action):
 
     pidA, pidE, i = action[0], action[1], action[2]
 
-    cibleAdverse, cibleAlliee = dicPidEmplE[pidE], dicPidEmplA[pidA]
+    if j == 0:
+        cibleAdverse, cibleAlliee = dicPidEmplE[pidE], dicPidEmplA[pidA]
+    if j == 1:
+        cibleAdverse, cibleAlliee = dicPidEmplA[pidA], dicPidEmplE[pidE]
 
 
     etatJeu.change_cible_adverse(coords(cibleAdverse), j)
@@ -468,6 +503,7 @@ def lance_jeu(etatInitial, done):
     memo = None
     s = 0
     while True:
+        etatJ = deepcopy(etatJeu)
         resultat = etatJeu.debut_de_tour()
         if not done:
             _initialise_root(etatJeu)
@@ -481,7 +517,7 @@ def lance_jeu(etatInitial, done):
                 _faire_un_back_up(noeud, v)
             return
 
-        a, b, c, memo = tour_de_jeu(etatJeu, memo, etatJeu.doitJouer.equipe, s)
+        a, b, c, memo = tour_de_jeu(etatJ, memo, etatJeu.doitJouer.equipe, s)
 
         s = 1
         action = a, b, c
@@ -570,17 +606,12 @@ def _get_etatJeu_from_enfants(node, action):
 
 
 def _get_training_examples(nr):
-    global root, noeud, temperature
+    global root, noeud
     training = []
     lance_jeu(None, False)
-    temperature = 1
-    move = 0
     while True:
         for i in range(nr):
             lance_jeu(open_variable("etatJeu"), True)
-
-        if move >= 11:
-            temperature = 0.1
 
         etat = open_variable("etatJeu")
         probabilities = _get_action_probabilities(root)
@@ -602,8 +633,6 @@ def _get_training_examples(nr):
         if resultat != PRET_AU_COMBAT:
             _set_gain(training, _points(etatJeu))
             return training
-
-        move += 1
 
 
 
@@ -661,27 +690,40 @@ def generate_data(n, nr):
     save_variable("neural_network", network_to_train)
 
 
-
-
 ## FAIRE COMBATRE LES IA
 
 def tour_de_jeu_ia(etatJeu, network, j):
     actions, actions_filter = _get_possible_actions_for_actual_state(etatJeu)
-    state = _get_game_state(etatJeu)
-    prediction = network.predict(state)
-    Ps, v = prediction[PROBABILITIES], prediction[VALUE]
-    Ps = Ps * np.array([actions_filter])
-    Ps = list(Ps[0])
-
-    idx = Ps.index(max(Ps))
-
-
-    return actions[idx]
+    if network != 5:
+        state = _get_game_state(etatJeu)
+        prediction = network.predict(state)
+        Ps, v = prediction[PROBABILITIES], prediction[VALUE]
+        Ps = Ps * np.array([actions_filter])
+        Ps = list(Ps[0])
 
 
+        idx = Ps.index(max(Ps))
+        pidA, pidE, i = actions[idx]
+        if j == 0:
+            return dicPidEmplE[pidE], dicPidEmplA[pidA], i
+        else:
+            return dicPidEmplA[pidA], dicPidEmplE[pidE], i
 
+    else:
+        L = []
+        for i in range(len(actions)):
+            if actions[i] != None:
+                L.append(actions.index(actions[i]))
+        randInt = randint(0, len(L)-1)
+
+        pidA, pidE, i = actions[L[randInt]]
+        if j == 0:
+            return dicPidEmplE[pidE], dicPidEmplA[pidA], i
+        else:
+            return dicPidEmplA[pidA], dicPidEmplE[pidE], i
 
 def lance_jeu_ia(joueur1, joueur2):
+    global joueurs
     joueurs = [joueur1, joueur2]
 
     etatJeu = EtatJeu()
@@ -713,8 +755,7 @@ def lance_jeu_ia(joueur1, joueur2):
         #try:
         if True:
 
-            pidA, pidE, i = tour_de_jeu_ia(deepcopy(etatJeu), joueurs[j], j)
-            cibleAdverse, cibleAlliee = dicPidEmplE[pidE], dicPidEmplA[pidA]
+            cibleAdverse, cibleAlliee, i = tour_de_jeu_ia(deepcopy(etatJeu), joueurs[j], j)
         #except:
             #print("Erreur à l'exécution du tour de jeu du joueur", j)
             #exit()
@@ -727,32 +768,19 @@ def lance_jeu_ia(joueur1, joueur2):
 
         etatJeu.applique_capacite(etatJeu.doitJouer.capacites[i], etatJeu.doitJouer)
 
+
         etatJeu.fin_de_tour()
-
-
-
-
-def transform(donnee):
-    for d in donnee:
-        P = [0] * 75
-        index = d[1].index(max(d[1]))
-        P[index] = 1
-        d[1] = P
-    return donnee
-
 
 
 ##Entrainer l'IA
 
 def train_(net, donnee):
-    prob = net.reseau_probas
-    val = net.reseau_values
-
-    for entrainement in range(200):
+    nr_batches = len(donnee) // 30
+    batches = [donnee[nr_batches*i : nr_batches*(i+1) + 1] for i in range(nr_batches)]
+    for entrainement in range(100):
         err = 0
         for d in donnee:
-            err += prob.train(d[0], d[1], 0.001)
-            val.train(d[0], d[2], 0.001)
+            err += net.train(d[0], d[1], d[2], 0.001)
         print(err/len(donnee))
 
 
@@ -763,36 +791,38 @@ def choose_best_ia(old_network, trained_network):
     p = _points(etatJeu)
     return int(p != - 1)
 
-
+from time import time
 def winning_rate():
     w = 0
     total = 0
-    old = open_variable("neural_network")
+    old = 5
     new = open_variable("trained_network")
-    for _ in range(25):
+    for _ in range(37):
         b = choose_best_ia(old, new)
         w += b
         total += 1
+        print(_)
+
 
     return w/total
 
 
 
-## Enfin le programme final, tourner celui-ci pour voir la magie apparaître !
+## Enfin le programme final, faire tourner celui-ci pour voir la magie apparaître !
 
 
 def training_loop(n, exists, nr_de_recherche_MCTS):
     global network_to_train, temperature
     if not exists:
-        network_to_train = NeuralNetworks(51, 75, optimizer = "Adam")
+        network_to_train = NeuralNetworks(52, 75, optimizer = "Adam")
         save_variable("init_net", network_to_train)
     else:
         network_to_train = open_variable("trained_network")
 
     for i in range(n):
         print("\n\n\n GENERATION N°: ", i+1)
-        generate_data(10, nr_de_recherche_MCTS)
-        donnees = transform(open_variable("donnees"))
+        generate_data(5, nr_de_recherche_MCTS)
+        donnees = open_variable("donnees")
         shuffle(donnees)
 
         print("\n\n\n ====================== Starting Training ======================")
@@ -804,5 +834,5 @@ def training_loop(n, exists, nr_de_recherche_MCTS):
             print("\nNew network won by a rate of: ", w)
         else:
             network_to_train = open_variable("neural_network")
-            print("\nOld network won by a rate of: ", 1- w)
+            print("\nOld network won by a rate of: ", 1 - w)
 
